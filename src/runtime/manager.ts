@@ -37,7 +37,7 @@ export class Manager {
       this.handleMessage(worker, message);
     });
 
-    worker.on('error', (err) => {
+    worker.on('error', (err: Error) => {
       this.handleWorkerCrash(worker, err.message);
     });
 
