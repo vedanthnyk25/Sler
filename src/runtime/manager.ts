@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Worker } from "node:worker_threads";
 import type { Job, ManagerMessage } from "../types/index.js";
+import {Scheduler} from "./scheduler.js";
 
 type PendingJob = {
   resolve: (value: unknown) => void;
@@ -8,13 +9,11 @@ type PendingJob = {
 };
 
 export class Manager {
-  private pendingJobs = new Map<string, PendingJob>();
-  private jobQueue: Job[] = [];
-  
+  private pendingJobs = new Map<string, PendingJob>();  
   private workers: Worker[] = [];
   private idleWorkers = new Set<Worker>();
   private activeWorkerJobs = new Map<Worker, string>();
-  
+  private Scheduler: Scheduler = new Scheduler();
   private maxWorkers: number;
 
   constructor(maxWorkers: number) {
@@ -68,23 +67,25 @@ export class Manager {
     this.dispatch();
   }
 
-  enqueue(code: string): Promise<unknown> {
+  enqueue(code: string, tenantId: string): Promise<unknown> {
     const jobId = randomUUID();
 
     const promise = new Promise<unknown>((resolve, reject) => {
       this.pendingJobs.set(jobId, { resolve, reject });
     });
 
-    this.jobQueue.push({ jobId, code });
+    const job: Job = { jobId, tenantId, code, enqueuedAt: Date.now() };
+
+    this.Scheduler.enqueue(job);
     this.dispatch();
 
     return promise;
   }
 
   private dispatch() {
-    while (this.jobQueue.length > 0 && this.idleWorkers.size > 0) {
-      const job = this.jobQueue.shift()!;
-      
+    while (this.Scheduler.areJobsAvailable() && this.idleWorkers.size > 0) {
+      const job = this.Scheduler.next()!;
+  
       const worker = this.idleWorkers.values().next().value!;
       
       this.idleWorkers.delete(worker);

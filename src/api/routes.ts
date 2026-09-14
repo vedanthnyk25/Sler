@@ -13,10 +13,13 @@ const manager = new Manager(4);
 router.post("/execute", handleExecution);
 
 async function handleExecution(req: Request, res: Response) {
-  const { code } = req.body;  
+  const { code, tenantId } = req.body;
+  if(tenantId === undefined || typeof tenantId !== "string" || tenantId.trim() === "") {
+    return res.status(400).json({ error: "Invalid tenantId" });
+  }
 
   try {
-    const result = await manager.enqueue(code);
+    const result = await manager.enqueue(code, tenantId);
     res.json({ result });
   }
   catch(error) {

@@ -1,7 +1,9 @@
 //HTTP handler->Manager
 export interface Job {
   jobId: string;
+  tenantId: string;
   code: string;
+  enqueuedAt: number;
 }
 
 //Manager->Worker 
