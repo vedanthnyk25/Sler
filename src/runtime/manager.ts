@@ -1,7 +1,10 @@
-import { randomUUID } from "node:crypto";
-import { Worker } from "node:worker_threads";
-import type { Job, ManagerMessage } from "../types/index.js";
-import {Scheduler} from "./scheduler.js";
+import { randomUUID } from 'node:crypto';
+import { Worker } from 'node:worker_threads';
+
+import type { Job, ManagerMessage } from '../types/index.js';
+import { Scheduler } from './scheduler.js';
+import { CircuitOpenError, QueueFullError } from './errors.js';
+import { TenantManager } from './tenant-manager.js';
 
 type PendingJob = {
   resolve: (value: unknown) => void;
@@ -9,26 +12,27 @@ type PendingJob = {
 };
 
 export class Manager {
-  private pendingJobs = new Map<string, PendingJob>();  
+  private readonly pendingJobs = new Map<string, PendingJob>();
+
   private workers: Worker[] = [];
-  private idleWorkers = new Set<Worker>();
-  private activeWorkerJobs = new Map<Worker, string>();
-  private Scheduler: Scheduler = new Scheduler();
-  private maxWorkers: number;
+  private readonly idleWorkers = new Set<Worker>();
 
-  constructor(maxWorkers: number) {
-    this.maxWorkers = maxWorkers;
+  private readonly activeWorkerJobs = new Map<Worker, Job>();
 
+  private readonly scheduler = new Scheduler();
+  private readonly tenantManager = new TenantManager();
+
+  constructor(private readonly maxWorkers: number) {
     for (let i = 0; i < maxWorkers; i++) {
       this.spawnWorker();
     }
   }
 
-  private spawnWorker() {
+  private spawnWorker(): void {
     const worker = new Worker(new URL('./worker.ts', import.meta.url), {
-      execArgv: ['--import', 'tsx']
+      execArgv: ['--import', 'tsx'],
     });
-    
+
     this.workers.push(worker);
     this.idleWorkers.add(worker);
 
@@ -47,70 +51,129 @@ export class Manager {
     });
   }
 
-  private handleWorkerCrash(worker: Worker, reason: string) {
-    // Reject the promise if the worker was executing a job
-    const jobId = this.activeWorkerJobs.get(worker);
-    
-    if (jobId && this.pendingJobs.has(jobId)) {
-      const { reject } = this.pendingJobs.get(jobId)!;
-      reject(new Error(`Worker crashed: ${reason}`));
-      this.pendingJobs.delete(jobId);
+  enqueue(code: string, tenantId: string): Promise<unknown> {
+    // Circuit breaker is checked first because it is admission control.
+    if (!this.tenantManager.circuitAllows(tenantId)) {
+      return Promise.reject(new CircuitOpenError());
     }
 
-    // Purge the dead worker from all state tracking
-    this.activeWorkerJobs.delete(worker);
-    this.idleWorkers.delete(worker);
-    this.workers = this.workers.filter(w => w !== worker);
+    const queueSize = this.scheduler.queueSize(tenantId);
 
-    // Self-heal the pool and check for waiting jobs
-    this.spawnWorker();
-    this.dispatch();
-  }
+    if (!this.tenantManager.queueAllows(queueSize)) {
+      return Promise.reject(new QueueFullError());
+    }
 
-  enqueue(code: string, tenantId: string): Promise<unknown> {
     const jobId = randomUUID();
 
     const promise = new Promise<unknown>((resolve, reject) => {
-      this.pendingJobs.set(jobId, { resolve, reject });
+      this.pendingJobs.set(jobId, {
+        resolve,
+        reject,
+      });
     });
 
-    const job: Job = { jobId, tenantId, code, enqueuedAt: Date.now() };
+    const job: Job = {
+      jobId,
+      tenantId,
+      code,
+      enqueuedAt: Date.now(),
+    };
 
-    this.Scheduler.enqueue(job);
+    this.scheduler.enqueue(job);
+
     this.dispatch();
 
     return promise;
   }
 
-  private dispatch() {
-    while (this.Scheduler.areJobsAvailable() && this.idleWorkers.size > 0) {
-      const job = this.Scheduler.next()!;
-  
-      const worker = this.idleWorkers.values().next().value!;
-      
+  private dispatch(): void {
+    while (this.scheduler.areJobsAvailable() && this.idleWorkers.size > 0) {
+      /*
+       * Scheduler performs round-robin selection.
+       *
+       * TenantManager decides whether the selected tenant
+       * is currently allowed to consume another worker slot.
+       *
+       * An ineligible tenant is skipped without losing its job.
+       */
+      const job = this.scheduler.next((tenantId: string) =>
+        this.tenantManager.canRun(tenantId)
+      );
+
+      if (!job) {
+        break;
+      }
+
+      const worker = this.idleWorkers.values().next().value;
+
+      if (!worker) {
+        break;
+      }
+
       this.idleWorkers.delete(worker);
-      this.activeWorkerJobs.set(worker, job.jobId);
-      
-      worker.postMessage({ type: "EXECUTE", payload: job });
+      this.activeWorkerJobs.set(worker, job);
+
+      this.tenantManager.jobStarted(job.tenantId);
+
+      worker.postMessage({
+        type: 'EXECUTE',
+        payload: job,
+      });
     }
   }
 
-  private handleMessage(worker: Worker, message: ManagerMessage) {
+  private handleMessage(worker: Worker, message: ManagerMessage): void {
+    const job = this.activeWorkerJobs.get(worker);
+
     this.activeWorkerJobs.delete(worker);
 
-    if (this.pendingJobs.has(message.jobId)) {
-      const { resolve, reject } = this.pendingJobs.get(message.jobId)!;
-      
-      if (message.type === "SUCCESS") {
-        resolve(message.result);
-      } else {
-        reject(new Error(message.error));
-      }
+    if (job) {
+      this.tenantManager.jobFinished(job.tenantId);
 
-      this.pendingJobs.delete(message.jobId);
+      const pending = this.pendingJobs.get(message.jobId);
+
+      if (pending) {
+        if (message.type === 'SUCCESS') {
+          this.tenantManager.recordSuccess(job.tenantId);
+          pending.resolve(message.result);
+        } else {
+          this.tenantManager.recordFailure(job.tenantId);
+          pending.reject(new Error(message.error));
+        }
+
+        this.pendingJobs.delete(message.jobId);
+      }
     }
 
     this.idleWorkers.add(worker);
+
+    this.dispatch();
+  }
+
+  private handleWorkerCrash(worker: Worker, reason: string): void {
+    const job = this.activeWorkerJobs.get(worker);
+
+    if (job) {
+      this.tenantManager.jobFinished(job.tenantId);
+      this.tenantManager.recordFailure(job.tenantId);
+
+      const pending = this.pendingJobs.get(job.jobId);
+
+      if (pending) {
+        pending.reject(new Error(`Worker crashed: ${reason}`));
+
+        this.pendingJobs.delete(job.jobId);
+      }
+
+      this.activeWorkerJobs.delete(worker);
+    }
+
+    this.idleWorkers.delete(worker);
+
+    this.workers = this.workers.filter((w) => w !== worker);
+
+    this.spawnWorker();
+
     this.dispatch();
   }
 }

@@ -1,4 +1,4 @@
-import ivm from "isolated-vm";
+import ivm from 'isolated-vm';
 
 export const executeInIsolate = (code: string): unknown => {
   const isolate = new ivm.Isolate({ memoryLimit: 128 });

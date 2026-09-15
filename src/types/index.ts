@@ -6,21 +6,21 @@ export interface Job {
   enqueuedAt: number;
 }
 
-//Manager->Worker 
+//Manager->Worker
 export type WorkerMessage = {
-  type: "EXECUTE";
+  type: 'EXECUTE';
   payload: Job;
 };
 
 //Worker->Manager
 export type ManagerMessage =
   | {
-      type: "SUCCESS";
+      type: 'SUCCESS';
       jobId: string;
       result: unknown;
     }
   | {
-      type: "ERROR";
+      type: 'ERROR';
       jobId: string;
       error: string;
     };
