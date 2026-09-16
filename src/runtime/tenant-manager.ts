@@ -5,15 +5,15 @@ export class TenantManager {
 
   private readonly tenantConcurrency = new Map<string, number>();
 
-  private readonly MAX_QUEUE_DEPTH = 100;
-  private readonly MAX_CONCURRENT_PER_TENANT = 2;
+  private readonly MAX_TENANT_QUEUE_DEPTH = 500;
+  private readonly MAX_CONCURRENT_PER_TENANT = 4;
 
   circuitAllows(tenantId: string): boolean {
     return this.circuitBreaker.isAllowed(tenantId);
   }
 
   queueAllows(queueSize: number): boolean {
-    return queueSize < this.MAX_QUEUE_DEPTH;
+    return queueSize < this.MAX_TENANT_QUEUE_DEPTH;
   }
 
   canRun(tenantId: string): boolean {

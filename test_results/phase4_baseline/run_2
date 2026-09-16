@@ -1,0 +1,40 @@
+========================================
+SLER PRODUCTION BENCHMARK
+========================================
+Target:            http://localhost:3000
+Total requests:    1000
+Concurrency:       8
+Warmup requests:   100
+Tenants:           8
+
+Checking server...
+Health check: OK
+
+Running warmup...
+Warmup complete.
+
+Running benchmark...
+
+========================================
+HTTP LATENCY
+========================================
+Requests:        1000
+Successful:      1000
+Failed:          0
+Duration:        745.00 ms
+Throughput:      1342.28 req/s
+----------------------------------------
+Min:             2.65 ms
+Mean:            5.94 ms
+P50:             5.24 ms
+P95:             10.24 ms
+P99:             15.42 ms
+P99.9:           21.15 ms
+Max:             21.90 ms
+----------------------------------------
+HTTP Statuses:
+  200: 1000
+
+========================================
+BENCHMARK COMPLETE
+========================================

@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { Worker } from 'node:worker_threads';
+import { Metrics } from '../metrics/index.js';
 
 import type { Job, ManagerMessage } from '../types/index.js';
-import { Scheduler } from './scheduler.js';
 import { CircuitOpenError, QueueFullError } from './errors.js';
+import { Scheduler } from './scheduler.js';
 import { TenantManager } from './tenant-manager.js';
 
 type PendingJob = {
@@ -21,8 +22,11 @@ export class Manager {
 
   private readonly scheduler = new Scheduler();
   private readonly tenantManager = new TenantManager();
+  private readonly metrics: Metrics;
 
-  constructor(private readonly maxWorkers: number) {
+  constructor(private readonly maxWorkers: number, metrics: Metrics) {
+    this.metrics = metrics;
+    
     for (let i = 0; i < maxWorkers; i++) {
       this.spawnWorker();
     }
@@ -76,7 +80,7 @@ export class Manager {
       jobId,
       tenantId,
       code,
-      enqueuedAt: Date.now(),
+      enqueuedAt: performance.now(),
     };
 
     this.scheduler.enqueue(job);
@@ -89,12 +93,11 @@ export class Manager {
   private dispatch(): void {
     while (this.scheduler.areJobsAvailable() && this.idleWorkers.size > 0) {
       /*
-       * Scheduler performs round-robin selection.
-       *
-       * TenantManager decides whether the selected tenant
-       * is currently allowed to consume another worker slot.
-       *
-       * An ineligible tenant is skipped without losing its job.
+        Scheduler performs round-robin selection.
+      
+        TenantManager decides whether the selected tenant is currently allowed to consume another worker slot.
+      
+        An ineligible tenant is skipped without losing its job.
        */
       const job = this.scheduler.next((tenantId: string) =>
         this.tenantManager.canRun(tenantId)
@@ -103,6 +106,11 @@ export class Manager {
       if (!job) {
         break;
       }
+
+      const now = performance.now();
+
+      job.dispatchedAt = now;
+      this.metrics.recordQueueWait(now - job.enqueuedAt);
 
       const worker = this.idleWorkers.values().next().value;
 
@@ -135,11 +143,18 @@ export class Manager {
       if (pending) {
         if (message.type === 'SUCCESS') {
           this.tenantManager.recordSuccess(job.tenantId);
+          this.metrics.recordSuccess();
           pending.resolve(message.result);
         } else {
           this.tenantManager.recordFailure(job.tenantId);
+          this.metrics.recordFailure();
           pending.reject(new Error(message.error));
         }
+
+        const completedAt = performance.now();
+        this.metrics.recordExecutionTime(completedAt - job.dispatchedAt!);
+
+        this.metrics.recordTotalTime(completedAt - job.enqueuedAt);
 
         this.pendingJobs.delete(message.jobId);
       }

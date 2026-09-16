@@ -2,7 +2,7 @@ type TenantCircuitState = {
   consecutiveFailures: number;
   state: 'CLOSED' | 'OPEN' | 'HALF_OPEN';
   openedAt?: number | undefined;
-  halfOpenTrialInProgress: boolean;
+  halfOpenTrialStartTime?: number | undefined;
 };
 
 export class CircuitBreaker {
@@ -10,13 +10,13 @@ export class CircuitBreaker {
 
   private readonly FAILURE_THRESHOLD = 5;
   private readonly COOLDOWN_MS = 60_000;
+  private readonly HALF_OPEN_TRIAL_MS = 10_000;
 
   private getState(tenantId: string): TenantCircuitState {
     if (!this.circuitStates.has(tenantId)) {
       this.circuitStates.set(tenantId, {
         consecutiveFailures: 0,
         state: 'CLOSED',
-        halfOpenTrialInProgress: false,
       });
     }
 
@@ -30,7 +30,6 @@ export class CircuitBreaker {
     if (state.state === 'HALF_OPEN') {
       state.state = 'OPEN';
       state.openedAt = Date.now();
-      state.halfOpenTrialInProgress = false;
       return;
     }
 
@@ -48,7 +47,6 @@ export class CircuitBreaker {
     state.consecutiveFailures = 0;
     state.state = 'CLOSED';
     state.openedAt = undefined;
-    state.halfOpenTrialInProgress = false;
   }
 
   isAllowed(tenantId: string): boolean {
@@ -68,7 +66,7 @@ export class CircuitBreaker {
         now - state.openedAt >= this.COOLDOWN_MS
       ) {
         state.state = 'HALF_OPEN';
-        state.halfOpenTrialInProgress = true;
+        state.halfOpenTrialStartTime = now;
 
         return true;
       }
@@ -78,7 +76,16 @@ export class CircuitBreaker {
 
     // HALF_OPEN — only allow one trial request
     if (state.state === 'HALF_OPEN') {
-      return false;
+      if (
+        Date.now() - (state.halfOpenTrialStartTime ?? 0) >=
+        this.HALF_OPEN_TRIAL_MS
+      ) {
+        state.state = 'OPEN';
+        state.openedAt = Date.now();
+        state.halfOpenTrialStartTime = undefined;
+
+        return false;
+      }
     }
 
     return false;

@@ -4,6 +4,7 @@ export interface Job {
   tenantId: string;
   code: string;
   enqueuedAt: number;
+  dispatchedAt?: number;
 }
 
 //Manager->Worker
