@@ -19,9 +19,17 @@ export type ManagerMessage =
       type: 'SUCCESS';
       jobId: string;
       result: unknown;
+      isolateCreationTime: number;
+      scriptExecutionTime: number;
     }
   | {
       type: 'ERROR';
       jobId: string;
       error: string;
     };
+
+export interface IsolateExecutionResult {
+  result: unknown;
+  isolateCreationTime: number;
+  scriptExecutionTime: number;
+}

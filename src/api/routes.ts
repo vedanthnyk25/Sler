@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import { Router } from 'express';
 import { Manager } from '../runtime/manager.js';
-import {Metrics} from '../metrics/index.js';
+import { Metrics } from '../metrics/index.js';
 
 export const router = Router();
 

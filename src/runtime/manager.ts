@@ -24,9 +24,12 @@ export class Manager {
   private readonly tenantManager = new TenantManager();
   private readonly metrics: Metrics;
 
-  constructor(private readonly maxWorkers: number, metrics: Metrics) {
+  constructor(
+    private readonly maxWorkers: number,
+    metrics: Metrics
+  ) {
     this.metrics = metrics;
-    
+
     for (let i = 0; i < maxWorkers; i++) {
       this.spawnWorker();
     }
@@ -94,9 +97,9 @@ export class Manager {
     while (this.scheduler.areJobsAvailable() && this.idleWorkers.size > 0) {
       /*
         Scheduler performs round-robin selection.
-      
+
         TenantManager decides whether the selected tenant is currently allowed to consume another worker slot.
-      
+
         An ineligible tenant is skipped without losing its job.
        */
       const job = this.scheduler.next((tenantId: string) =>
@@ -144,6 +147,10 @@ export class Manager {
         if (message.type === 'SUCCESS') {
           this.tenantManager.recordSuccess(job.tenantId);
           this.metrics.recordSuccess();
+
+          this.metrics.recordIsolateCreationTime(message.isolateCreationTime);
+          this.metrics.recordScriptExecutionTime(message.scriptExecutionTime);
+
           pending.resolve(message.result);
         } else {
           this.tenantManager.recordFailure(job.tenantId);

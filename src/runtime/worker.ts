@@ -13,7 +13,9 @@ parentPort?.on('message', async (msg: WorkerMessage) => {
     const response: ManagerMessage = {
       type: 'SUCCESS',
       jobId,
-      result,
+      result: result.result,
+      isolateCreationTime: result.isolateCreationTime,
+      scriptExecutionTime: result.scriptExecutionTime,
     };
 
     parentPort?.postMessage(response);
