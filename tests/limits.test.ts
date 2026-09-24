@@ -32,7 +32,8 @@ test("Phase 3: Resource Limits & Backpressure", async (t) => {
     "Circuit Breaker: Trips after 5 consecutive failures",
     async () => {
       const crashingCode = "throw new Error('Boom');";
-      const tenantId = "tenant-breaker";
+      // Use unique tenant ID to avoid state pollution from previous test runs
+      const tenantId = `tenant-breaker-${Date.now()}`;
 
       for (let i = 0; i < 5; i++) {
         const { status } = await executeCode(
@@ -85,28 +86,31 @@ test("Phase 3: Resource Limits & Backpressure", async (t) => {
    */
 
   await t.test(
-    "Backpressure: Rejects jobs when queue depth exceeds 100",
+    "Backpressure: Rejects jobs when queue depth exceeds 500",
     async () => {
+      // Use moderate execution time to allow queue to build up without taking too long
       const slowCode = `
-        const end = Date.now() + 100;
+        const end = Date.now() + 200;
         while (Date.now() < end) {}
         1;
       `;
 
-      const tenantId = "tenant-flood";
+      const tenantId = `tenant-flood-${Date.now()}`;
 
       /*
-       * Tenant concurrency = 2
-       * Queue depth = 100
+       * Tenant concurrency = 4
+       * Queue depth = 500
        *
        * Therefore:
-       *   2 jobs  -> running
-       *   100 jobs -> queued
+       *   4 jobs  -> running
+       *   500 jobs -> queued
        *   remaining jobs -> rejected
        */
 
+      // Send a large burst of requests at once to fill the queue
+      const TOTAL_REQUESTS = 510;
       const floodPromises = Array.from(
-        { length: 105 },
+        { length: TOTAL_REQUESTS },
         () => executeCode(slowCode, tenantId)
       );
 
@@ -118,7 +122,7 @@ test("Phase 3: Resource Limits & Backpressure", async (t) => {
 
       assert.ok(
         rateLimited.length >= 1,
-        "Expected at least one request to be rejected with 429"
+        `Expected at least one request to be rejected with 429, got ${rateLimited.length}`
       );
 
       assert.ok(

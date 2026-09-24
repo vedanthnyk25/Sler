@@ -3,11 +3,11 @@ import test from "node:test";
 
 const API_URL = "http://localhost:3000/api/execute";
 
-async function executeCode(code: string) {
+async function executeCode(code: string, tenantId = "tenant-isolation") {
   const res = await fetch(API_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ code }),
+    body: JSON.stringify({ code, tenantId }),
   });
   const data = await res.json();
   return { status: res.status, data };
