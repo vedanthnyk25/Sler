@@ -1,0 +1,25 @@
+{
+  "timestamp": "2026-09-21T20:35:08.159Z",
+  "configuration": {
+    "totalRequests": 1000,
+    "concurrency": 8,
+    "warmupRequests": 100,
+    "tenantCount": 8
+  },
+  "results": {
+    "success": 1000,
+    "failure": 0,
+    "durationMs": 805.2173730000002,
+    "throughputRps": 1241.9006761792753,
+    "minMs": 2.6483900000002905,
+    "meanMs": 6.417967047999995,
+    "p50Ms": 6.05730949999986,
+    "p95Ms": 10.998949349999963,
+    "p99Ms": 18.311507900000024,
+    "p999Ms": 26.443375363000218,
+    "maxMs": 26.982199000000037,
+    "statusCounts": {
+      "200": 1000
+    }
+  }
+}
